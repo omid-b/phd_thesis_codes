@@ -1,0 +1,40 @@
+#!/bin/csh
+# Plot single dispersion curve from a period, phasevel text file
+#used parameters in 'param.csh': homedir, passbands
+
+if ($#argv<1) then
+echo "USAGE:  plot_1d.gmt <dispfile> <psfile>"
+exit 
+endif
+
+cd `dirname $0`
+source ../param.csh
+
+set dispfile=$1
+set PSFILE=$2
+
+set maxvel=`awk '{print $2}' $dispfile|sort -nr|awk 'NR==1'`
+set minvel=`awk '{print $2}' $dispfile|sort -n|awk 'NR==1'`
+set max=`echo "$maxvel+0.1"|bc`
+set min=`echo "$minvel-0.1"|bc`
+
+printf "8.0000 3.2072\n9.0220 3.2243\n10.0392 3.2454\n11.0107 3.2691\n12.0471 3.2978\n13.0446 3.3286\n14.0274 3.3615\n15.0588 3.3983\n16.0000 3.4335\n17.0667 3.4746\n18.1239 3.5157\n19.1402 3.5548\n20.0784 3.5900\n21.1134 3.6273\n22.0215 3.6582\n23.0112 3.6898\n24.0941 3.7217\n25.2840 3.7534\n26.2564 3.7768\n27.3067 3.7998\n28.0548 3.8148\n29.2571 3.8366\n30.1176 3.8508\n31.0303 3.8645\n32.0000 3.8779\n33.0323 3.8909\n34.1333 3.9035\n35.3103 3.9157\n36.5714 3.9275\n37.2364 3.9333\n38.6415 3.9446\n39.3846 3.9501\n40.1569 3.9556\n41.7959 3.9664\n42.6667 3.9717\n43.5745 3.9769\n44.5217 3.9821\n45.5111 3.9873\n46.5454 3.9925\n47.6279 3.9977\n48.7619 4.0028\n49.9512 4.0080\n51.2000 4.0133\n52.5128 4.0185\n53.8947 4.0239\n55.3513 4.0293\n56.8889 4.0349\n58.5143 4.0406\n60.2353 4.0464\n62.0606 4.0525\n64.0000 4.0588\n66.0645 4.0654\n68.2667 4.0723\n70.6207 4.0796\n73.1429 4.0874\n75.8519 4.0957\n78.7692 4.1048\n81.9200 4.1145\n85.3333 4.1252\n89.0435 4.1371\n93.0909 4.1502\n97.5238 4.1650\n102.4000 4.1818\n107.7895 4.2009\n113.7778 4.2231\n120.4706 4.2490\n128.0000 4.2797\n136.5333 4.3165\n146.2857 4.3612\n157.5385 4.4161\n170.6667 4.4848\n186.1818 4.5718\n204.8000 4.6832\n227.5556 4.8263\n256.0000 5.0072\n292.5714 5.2242\n341.3333 5.4594\n409.6000 5.6825\n512.0000 5.8730\n682.6667 6.0332\n" > $homedir/ak135.disp
+
+gmt psbasemap -R10/210/$min/$max -JX24/16 -Bxa20f5 -Bya0.2f0.1 -BWSne -K > $PSFILE
+gmt psxy $homedir/ak135.disp -JX -R -Wthick,gray59,dashed -O -K >> $PSFILE
+awk 'NR > 1 {print $3,$4}' < $passbands | gmt psxy -JX -R -Ss0.3 -Gblack -O -K >> $PSFILE
+
+gmt psxy $dispfile -JX -R -Sa0.5 -Gred -O -K >> $PSFILE
+
+gmt psbasemap -R0/6/0/4 -X1 -Y12 -JX6/3 -Bx0 -By0 -K -O >> $PSFILE
+
+echo "0.5 3.2\n 1.7 3.2 " | gmt psxy -JX -R -Wthick,gray59,dashed -O -K >> $PSFILE
+echo "2.5 3.2 ak135" | gmt pstext -JX -R -O -K >> $PSFILE
+echo "1   2" | gmt psxy -JX -R -Ss0.3 -Gblack -O -K >> $PSFILE
+echo "3.3 2 Starting Model" | gmt pstext -JX -R -O -K >> $PSFILE
+echo "1   0.8" | gmt psxy -JX -R -Sa0.5 -Gred -O -K >> $PSFILE
+echo "3.7 0.8 1D inversion result" | gmt pstext -JX -R -O  >> $PSFILE
+
+#ps2epsi $PSFILE
+#epstopdf *.epsi
+rm -f *.history

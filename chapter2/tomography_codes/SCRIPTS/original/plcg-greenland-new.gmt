@@ -1,0 +1,95 @@
+#!/bin/csh -f
+
+set prc = 1	
+set workdir=/data/home/darbyshire_f/SW_TOMOGRAPHY
+
+#rm .gmtdefaults*
+gmt set FONT_TITLE  = 16
+gmt set FONT_LABEL = 14
+gmt set PS_SCALE_X = 1
+gmt set PS_SCALE_Y = 1
+gmt set MAP_FRAME_TYPE PLAIN
+#gmt set PS_MEDIA A3
+#gmt set PROJ_LENGTH_UNIT cm
+
+set region="-R-90/10/55/89"
+set proj = "-JF-45/73/17/4i"
+set flags = " -O -K -V" 
+
+set ks = `head -1 shell`
+set ks = `echo $ks[3] | awk -F. '{print $1}'`
+set stp = `head -4 inxc | tail -1`
+
+  # gmt makecpt -Ccea_tomo_L.cpt -T-2.4/2.4/0.1 > colors.cpt
+  # gmt makecpt -Ccea_tomo.cpt -T-3.5/3.5/0.1 -Z -A50 > cea_tomo_L.cpt
+
+set period = `pwd | wc -c`
+@ p0 = $period - 3
+set period = `pwd | cut -c $p0-$period`
+#echo ----$period----
+
+echo $period > tmp
+awk '{ \
+if ($1 < 27) print "colour25.cpt" \
+else if ($1 > 27 && $1 < 32) print "colour20.cpt" \
+else if ($1 > 32 && $1 < 42) print "colour15.cpt" \
+else if ($1 > 42) print "colour10.cpt" \
+}' < tmp > tmp1
+set scale = `awk '{print var"/"$1}' var=$workdir < tmp1 `
+echo "colour scale is $scale"
+
+#set scale=$workdir/colour5.cpt
+
+set psfile = tomo_${period}.ps
+#echo -------- $psfile --------
+
+cat dcg | awk '{print $1" "$2" "$4}' | gmt xyz2grd -Dms/m/m/1/0/=/= -Gdcg.grd -R0/360/45/89 -I$stp[2]/$stp[2]
+
+# Isotropic plus 2psi
+gmt psbasemap $proj $region -B360f2 -BWSEn -Y18 -K -P >! $psfile
+gmt grdview dcg.grd -C$scale $proj $region -Qi100 $flags -B >> $psfile
+gmt pscoast $proj $region -Di -Wthick,gray40 -A5000 -I5 -A2000 $flags >> $psfile
+awk '{if ($1 > 0) print $1,$2,$3,$7/10}' < dap | gmt psxy $proj $region -SV1c+jc -Wthickest,green3 -Ggreen3 $flags >> $psfile
+echo "-45 54 90 0.5" | gmt psxy $proj $region -SV1c+jc -Wthickest,green3 -Ggreen3 $flags -N >> $psfile
+echo "-45 53 5% anisotropy" | gmt pstext $proj $region -F+f12p,Helvetica $flags -N >> $psfile
+#echo "301 62 2 psi" | gmt pstext -F+f15p,Helvetica-Bold -R -JW $xys >> $psfile
+#echo "303 43 $period s" | gmt pstext -F+f15p,Helvetica-Bold -R -JW $xys >> $psfile
+
+# Isotropic plus 4psi
+# plus paths
+gmt psbasemap $proj $region -B360f2 -BWSEn -Y-12 $flags >> $psfile
+gmt grdview dcg.grd -C$scale $proj $region -Qi100 $flags -B >> $psfile
+gmt pscoast $proj $region -Di -Wthick,gray40 -Na -A5000 -I5 -A2000 $flags >> $psfile
+#gmt psxy paths $proj $region -Wthinnest,darkgreen -B $flags >> $psfile
+#gmt psxy paths $proj $region -St0.1 -Gred -B $flags >> $psfile
+awk '{if ($1 > 0) print $1,$2,$3,$7/10}' < d4p | gmt psxy $proj $region -SV1c+jc -Wthick,green3 -Ggreen3 $flags >> $psfile
+
+#tail -4 $scale | head -1 > tmp
+#awk '{ \
+#if ($3 >= 14) print "BIG" \
+#else if ($3 >= 6 && $3 >= 6) print "MED" \
+#else if ($3 < 6) print "SMALL" \
+#}' < tmp > tmp1
+#set inttype=`awk '{print $1}' < tmp1`
+
+#if ($inttype == BIG) then
+#gmt psscale -Dx3/-1+w5/0.5h -C$scale -B5+l"dU/U,%" -O -V -P -N >> $psfile
+#endif
+
+#if ($inttype == MED) then
+gmt psscale -Dx3/-1+w5/0.5h -C$scale -B3+l"dU/U,%" -O -V -P -N >> $psfile
+#endif
+
+#if ($inttype == SMALL) then
+#gmt psscale -Dx3/-1+w5/0.5h -C$scale -B1+l"dU/U,%" -O -V -P -N >> $psfile
+#endif
+
+#gmt psscale -D5/-1/5/0.3h -C${scale} -B1+l"dC/C,%" $flags >> $psfile
+# -D7.5/-1/5/0.5h (from plcg-synth.gmt)
+# -D5/-1/5/0.2h (from plcg.gmt)
+
+#echo "301 62 4 psi" | gmt pstext -F+f15p,Helvetica-Bold -R -JW $xys >> $psfile
+#echo "303 43 $period s" | gmt pstext -F+f15p,Helvetica-Bold -R -JW -O >> $psfile
+
+#gs $psfile
+

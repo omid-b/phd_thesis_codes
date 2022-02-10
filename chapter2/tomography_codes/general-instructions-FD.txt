@@ -1,0 +1,374 @@
+SURFACE WAVE TOMOGRAPHY CODE - SERGEI LEBEDEV
+=============================================
+
+INPUT DATA
+==========
+
+Each phase velocity curve must be in the following format:
+
+STA1 STA2				! names of stations
+LHZ LHZ					! not important, but must be there
+lat1 lon1 lat2 lon2			! lats & longs of stations
+period(s) phasevel(km/s) error(km/s)	! phase velocity data
+period(s) phasevel(km/s) error(km/s)
+period(s) phasevel(km/s) error(km/s)
+...
+
+Place the dispersion curves into a subdirectory of the main tomography directory
+(e.g. /home/xyzt/sw-tomography/dataset).
+In this directory, make a list of all dispersion curves. The filenames must include
+the entire path (e.g. /home/xyzt/sw-tomography/dataset/FRB_FCC.disp).
+
+BASIC BACKGROUND
+================
+
+3 main programs for the inversion process (plus a lot of auxiliary codes and
+scripts to make everything work, carry out quality control, resolution tests,
+etc.)
+
+1) "bac" - builds an approximately equidistant triangular model grid covering
+the globe; writes the "A" and "d" of the matrix Ax=d for the inversion.
+
+Compilation: gfortran -g -O3 -o bac bac.f tri_sub_dble.o tri_dble.o
+
+Before compiling bac, will likely need to recompile the C functions
+tri_sub_dble.c and tri_dble.c to create new object files tri_sub_dble.o
+and tri_dble.o if recompiling on a different platform; try the original .o
+files first in the bac compilation though in case they work already.
+
+Running: bac < inbac > outbac
+
+Requires input file "inbac" of the following form:
+
+/.../some_dataset/list			! list or directory of phasevel files*
+10					! number of periods
+10  0		outlier_info/010_orig/path_sel 		! period, refvel, pathlist
+15  0		outlier_info/015_orig/path_sel
+20  0		outlier_info/020_orig/path_sel
+25  0		outlier_info/025_orig/path_sel
+...
+200 0		outlier_info/200_orig/path_sel
+2                       ! anisotropy: 0 = none, 1 = 2psi-only, 2 = 2psi and 4psi
+0.                      ! path width, km (e.g. 0 km or 100 km)
+200. 40.                ! model and integration grid spacing (e.g. 100 30)
+
+*In the first line there is initially a path to a list of phase-velocity files
+containing the interstation measurements. The code should be used in this form
+for the initial run.
+
+There is a procedure for outlier-exclusion (see below), in which the selected
+subsets of the dataset are written into lists for subsequent runs. Their location
+is given in column 3 of inbac. When running bac with selected paths, the first
+line should be adjusted to the working directory containing the subdirectories
+with the selected paths, and must end with a "/".
+
+If inverting for anisotropy, one should use both 2psi and 4psi. Although Rayleigh waves in
+the mantle are primarily sensitive to 2psi, the inversion for both types allows some idea
+of leakage between parameters, and of areas where azimuthal coverage is not sufficient for
+a reliable estimate of 2psi anisotropy. Both 2psi and 4psi anisotropy are important in the
+crust, though 4psi is rarely shown or interpreted in studies.
+
+Grid-spacing: Integration grid should be around 3-5 times smaller than model grid. Model
+grid should reflect the level of detail required in the tomographic model, which in turn
+is decided by looking at station and path density in detail. (e.g. for Hudson Bay I used
+a 200km model-grid spacing, and for Greenland which had a much denser path coverage I
+used 100 km with 30 km for the integration grid.)
+
+The output of bac is a set of files named according to the period, e.g.:
+colsums020, ers020, matrix020, matrix_key020, paths020, path_list020, rhs020,
+shell020, shell_key020, stations020
+"rhs" and "ers" are the right-hand side of the inversion matrix (d) and errors,
+"matrix_key" contains summary information on the matrix, "shell" and "shell_key"
+define the grid.
+"paths" and "stations" are location files used in GMT plotting and "path_list"
+is the list of paths used.
+
+2) Script "sortdirs.csh" takes all the bac outputs and sorts them into directories
+named for period e.g. 010, 015... 200. The files are placed into these directories
+and their period suffices are removed e.g. "matrix020" becomes "020/matrix" etc.
+
+3) "iac" - carries out the inversion by solving the Ax=d system using linearised
+least-squares inversion with smoothing and damping... the "A" and "d" come from
+the output of program bac.
+
+Compilation: gfortran -O3 -g -o iac iac.f iac_subs.f
+
+Running: iac < iniac
+
+Requires input file "iniac" of the following form:
+
+900     ! max number of iterations
+25      ! intermediate solutions to output, after different # of iter (next line)
+1 2 3 5 7 10 15 20 30 40 50 70 100 130 160 200 250 300 350 400 500 600 700 800 900
+0.05 0.05 0.05  ! a,b,c: norm damping on C,2psi,4psi (a*dC=0; b*A=0; b*B=0; c*C=0; c*E=0)
+1 2 2           ! smoothing:  d*dC - d*(sum(dC(neighbours))/num_nbrs)=0; same for 2,4psi
+0.5 1 1         ! gradient damping
+0 0 0           ! norm-damp scaling, yes(1) or no(0): Vs, 2psi, 4psi 
+0.6 0.6 0.6     ! norm-damp scaling eps: Vs, 2psi, 4psi 
+
+Note that this file is automatically created when the script "do-iac.csh" is run.
+
+Intermediate solutions are written into files named "solution0001", "solution0003"...
+Final solution is written into file "solution"
+
+4) "xsc" processes  inversion solution to reader-friendly and GMT-friendly format.
+
+Compilation: gfortran -O3 -o xsc xsc.f
+
+Running: xsc < inxc
+
+Requires input file "inxc" of the following form:
+
+0		! plot columnsums? (no)
+0		! smoothing (no)
+200. 200. 200.	! scale limits *
+1 0.2		! make gridded output (1) or stick with points (0); grid spacing (deg)
+1 0.7		! plot whole model (0) or just regions covered by paths (1); max
+		  distance from nearest path (deg)
+
+This file is automatically created within the script "do-iac.csh" as well.
+
+* if < 1, plots as a proportion of the maximum value of the heterogeneity (useful for
+a first look); if > 1, plots up to a fixed range (i.e. sets the colour scale for the
+isotropic part of the plot and scales the size of bars for the anisotropy)
+(Default is 0.5 0.5 0.5)
+Note that the scale limits allow xsc to create its own colour palette file for the model.
+However, this has been superseded by Laura's (nicer) colour palettes; see "colourXX.cpt"
+where the "XX" refers to the scale limits in percent heterogeneity.
+
+SCRIPTS AND EXECUTABLES
+=======================
+
+EXECUTABLES
+===========
+
+bac			initial tomography model setup based on 2-station curve geometry
+corr_rhs
+excl_outl		exclude outliers from data set based on threshold criteria
+get_gridnos		find grid numbers associated with a given period, using "shell" file
+iac			the inversion code for the tomography (with damping & smoothing)
+make_reso_inC		create synthetic model for resolution tests
+make_rhsC		create synthetic dataset for resolution tests
+make_rhsC_err		as above, but with Gaussian noise
+reformat_sol		rewrite "solution" file to extract alpha parameters for isotropic and
+			anisotropic values
+xsc			convert tomographic inversion output to formats readable by GMT
+
+============
+SCRIPTS
+============
+
+countpaths.csh		counts number of paths selected after outlier-exclusion analysis
+cp-plots.csh		copies individual "plcg" plot files from directories and renames according
+			to directory
+damptest.csh		automates damping test for lots of different damping values
+dcpgridcount.csh	sorts gridpoints (for chosen directory) by longitude and assigns numbers to
+			them for identification in making 1D curves
+do-iac.csh		full run of IAC, XSC and plotting of results
+findspknos.csh		find an individual spike number in the grid (useful for resolution)
+getstats.csh		extracts vital statistics from the IAC/XSC run and outputs as a textfile
+gridnos-from-shell.csh	calls "get_gridnos" to find grid numbers from "shell" file, needed
+			for spike resolution tests
+make-1D-curves.csh	make full set of 1D curves for tomography maps, based on gridpoints of
+			most comprehensive period (user must choose and enter this)
+outliers.csh		automate the outlier-exclusion process with the same threshold criteria
+			for all periods
+plcg-greenland-new.gmt	plot anisotropic tomographic map for a given period directory
+plcg-synth-new.gmt	plot synthetic model for resolution test as gridded surface
+plotall.csh		specifies maximum for colour scales; runs XSC and plots results (without
+			rerunning IAC)
+plot-grids-greenland.gmt	plot all knotpoints for the whole study region - run after BAC but
+				before sortdirs.csh
+plot-knotnos.gmt		plot knot numbers from a lon,lat,knotno file
+plot-paths-greenland.gmt	plot paths across the region for a given period
+plot_tomo_L.gmt		Laura's plotting script for eastern Canada tomography results
+reformatsol.csh		runs "reformat_sol" program to extract alpha values (isotropic
+			and anisotropic) from solution and dcp files
+replace-dirname.csh	if moving directories after running outlier exclusion - replace directory
+			names as appropriate in the relevant text files
+resosmooth.csh		do a single resolution test at multiple values of smoothness parameter
+resotests.csh		full set of possible resolution tests (leakage, gradients, spikes)
+rnm-curves.csh		rename 1D curves to their numerical identifier instead of their lat,lon
+smoothtest.csh		automates smoothing test for lots of different smoothing values
+sortdirs.csh		moves results of BAC into period-specific directories (run before IAC)
+
+
+GENERAL PROCEDURE FOR INVERSION WORK
+====================================
+
+1) Gather data together in a directory; make sure all codes are compiled.
+
+
+2) Carry out a preliminary run of "bac" to make sure everything is working OK; in case of problems,
+check output logfile "outbac". Run "sortdirs.csh" to sort bac output into relevant period
+directories.
+
+
+3) Use script "do-iac.csh" to run through the inversions for the set of periods; this runs the
+codes "iac" and "xsc" automatically, using "iniac" and "inxc" input files set up in the script,
+then plots the results and generates a text file with the inversion statistics for each period.
+
+Once it's certain that everything is working...
+
+
+4) Carry out the following outlier exclusion procedure to make sure there are no spurious paths
+that are impossible for the inversion scheme to fit (as these paths may have data issues, and
+would thus bias the variance-reduction statistics etc.):
+
+i) Run bac/iac/xsc using VERY low values of smoothing and damping parameters to produce a rough
+model that therefore fits the data as well as possible. Rename the period directories to XXX_orig
+(e.g. 020_orig).
+
+Program excl_outl; compilation gfortran -o ../bin/excl_outl excl_outl.f
+
+This program allows one to exclude outlier measurements. The selected subsets of the
+initial data set at each period are written into lists and those lists are used in
+subsequent runs of the bac program.
+In this case, adjust input file inbac so that the first line is just the directory
+in which the period-specific lists are held (with a "/" at the end), then each of the
+period-specific lines gives the directory in which the list of selected paths (path_sel)
+is held.
+
+The program outputs:
+     rhs1 (line number; original rhs; rhs scaled to km/s; curve-file name), 
+     syndat (line #; synthetic rhs in km/s; curve-file name), 
+     syndif (line #; data-synthetic rhs mismatch in km/s; data-synthetic 
+	     rhs mismatch as proportion of measurement error; curve-file name),
+     path_sel (the list with selected, non-outlier measurements,  
+	       to be used for a re-run of bac.f), 
+     path_nsl (the list with rejected, outlier measurements), 
+     paths_sel.xy and paths_bad.xy for GMT plotting.
+
+The thresholds used to separate the outliers can be of different types,
+   the program has interactive input and asks for the type of and 
+   the value of the threshold factor.
+   types of threshold factors for path selection are:
+      1 -- threshold is a constant in m/s (e.g. 20), '
+            paths with misfit below the constant are selected
+      2 -- threshold is a proportion of the measurement error (e.g. 1),
+            paths with misfit below threshold*err are selected
+      3 -- threshold is a percentage of smallest-misfit paths to keep (e.g. 75),
+            with absolute misfit values compared
+      4 -- threshold is a percentage of smallest-misfit paths to keep (e.g. 75),
+            with the misfits compared as proportions of measurement errors
+
+My recommendation - choose option 2 - proportion of the measurement error.
+
+ii) Use script "outliers.csh" to run the outlier-exclusion algorithm. I do not like the idea of
+fixing the percentage of paths to keep (what if lots are bad, or what if they are all good?) so
+I've used the option of excluding paths for a threshold of 0.5 * measurement error. (You can try
+different proportions and see how many paths get excluded...)
+
+iii) Create a new directory "outlier_info" and place the "XXX_orig" directories into it. Modify
+the "inbac" input file so that the first line gives the path in which the "outlier_info" directory
+is situated; make sure the line ends with a "/".
+
+iv) Rerun bac/iac/xsc with the original moderate smoothing values and check everything is working.
+Take a close look at this stage at the plots and the inversion statistics files; at this stage
+you'll be starting to see the structures resolved by the tomography. It's worth keeping the results
+in a new subdirectory (e.g. "run_
+
+
+5) Smoothing/damping tests - these are necessary for getting the best possible regularisation
+parameters for the inversion (which will be different for every data set; depends on the data
+themselves and the path coverage). Best option is to pick one period to do the tests; perhaps
+not the period with the very best path coverage, but one with a good number of paths.
+The script "smoothtest.csh" carries out sets of inversions for different smoothing parameters
+at a fixed damping value, and "damptest.csh" is the equivalent for trying out different damping
+parameters. In both cases, the scripts read the sets of test parameters from a text file - see
+"smthtestvals-example". Each line gives a set of 3 smoothing (or damping) parameters, where the
+first is for isotropic, the second is for 2psi anisotropy and the third is for 4psi anisotropy.
+One should look at statistics for varied isotropic smoothing with anisotropic smoothing held
+constant, then separately look at statistics for isotropic smoothing held constant and anisotropic
+smoothing varied. 2psi and 4psi anisotropy should be equal.
+
+Recommendations:
+- cover a wide range of values (e.g. 0.01 to 10)
+- have a set where anisotropy is constant and isotropic smoothness varies, then another
+  where isotropy is constant and anisotropic smoothness varies (as the two tend to trade
+  off)
+- keep 2psi and 4psi smoothness the same, otherwise it will be more difficult to gauge
+  the tradeoffs and leakage
+
+
+For a given set, check the "stats-info" file for the following information:
+- remaining variance (= 1 - variance reduction; smaller value = better fit)
+- isotropic or anisotropic roughness values
+
+These parameters can be used to plot trade-off curves for isotropic or anisotropic tests. Like
+the body-wave tomography, a good rule of thumb is to choose smoothing parameters that give results
+at the 'knee' of the trade-off curve. Also it is important at the same time to look at the phase
+velocity maps from the different inversions and use a visual subjective impression to decide if
+the parameters give results that are 'too smooth', 'too rough' or 'about right'.
+Note also that anisotropic resolution is rarely as good as isotropic resolution, so the final
+choices of smoothing and damping parameters should have a smaller value for isotropic than
+than anisotropic.
+
+Once the final choice of smoothing parameters is made, do a complete bac/iac/xsc run and plot out
+the resulting phase velocity maps. Check the statistics text file for the maximum values of the
+perturbations and play around with values in the inxc files so that you can rerun the plotting
+codes (see script "plotall.csh") with near-constant colour scales in order to compare degrees
+of heterogeneity.
+
+[Information from Sergei:
+The smoothing penalizes the difference between the value at a grid point and the average over
+this grid point and its closest neighbours. This is similar to penalizing the second derivative.
+Hence, the largest anomalies are often at the periphery where data sampling is actually almost
+negligible.
+The other regularisation option is gradient damping, which is penalizing the difference between
+values at every pair of neighbouring grid points (similar to penalizing the 1st derivative)]
+
+
+6) Adjustment of reference velocities; when the inversion is run, the initial reference velocity
+is the average of all the phase velocities across the region for a given period. In theory this
+should balance the phase velocity maps such that the average value of the phase velocity is 0.0
+In practice, this is rarely the case, so some adjustment is necessary to get a proper balance.
+When bac is run with the value 0 in the 2nd column of the "inbac" file, the data average is taken
+as the reference velocity, and this value can be found in the last column of the text file
+"matrix_key".
+To make the adjustments:
+i) for each period, copy the reference velocity from "matrix_key" to the 2nd column of "inbac".
+Do a complete run of bac/iac/xsc and note the average value of the isotropic phase velocity.
+If it is not zero, adjust the reference velocity in "inbac" and repeat. Continue doing this for
+all the different periods until the average isotropic phase velocity is zero.
+
+
+7) Resolution tests - see the (long) script "resotests.csh". There are lots of different types of
+resolution tests one can do; some are 'prepackaged' through Sergei's codes, others require more
+user decisions and inputs. Broadly there are 4 types:
+
+i) Leakage tests - one takes the results of the inversion for a chosen period. One component of
+that phase-velocity map (isotropic-only, 2psi-only or 4psi-only) becomes the input model for the
+resolution test; this is used to generate synthetic data which are then inverted using the same
+path distribution and regularisation parameters, with a little Gaussian noise added to the system.
+What one looks for here are results where the chosen input component is well-recovered and the
+other two components have very small amplitude (ideally zero, but that will not happen!)
+
+ii) Synthetic starting model is a simple gradient from fast to slow across the study area; there
+are pre-defined "grad" models hardwired into the resolution-test codes with different directions
+for the gradients (e.g. north-south, NW-SE etc.)
+
+iii) 'Reversed' anisotropy ('anisrev' in the script) - this is a similar idea to the leakage tests
+in that it uses a real model. In this case the input to the resolution test is the original model
+but with the 2psi anisotropy rotated through 90 degrees. This is a useful test to see if bias in
+azimuthal coverage might affect the anisotropy fast direction in the results. Ideally the rotated
+directions should be well-recovered.
+
+iv) 'Spike' tests - this can be used to generate patterns of slow and fast phase velocity anomalies
+to make a checkerboard pattern or to assess the resolution of isolated shapes and structures in the
+model. Each grid point in the inversion has its own unique grid number (which varies from period to
+period) and the 'spike' anomalies are made by 'switching on' grid numbers of one's choice - these
+become slow anomalies. The steps for this process are:
+a) use script "gridnos-from-shell.csh" for a period or several periods to plot the grid numbers
+directly on a map of the study area. Based on these plots, decide on sets of grid points to 'switch
+on' to make anomaly patterns.
+b) for each chosen pattern, create a file called "spkN" where N is a number from 1 to 6. See file
+"spk-example". The first number in the file says how many grid points are 'switched on'; the other
+numbers specify which grid points those are.
+c) The same input files can be used to build resolution tests for 2psi anisotropy ('spike N anis'
+in the resolution test script).
+
+For each resolution test, there will be a plot of the synthetic model and a plot of the recovered
+model from the inversion. You may need to try the plotting with different colour scale maxima. You
+can also look at the inversion statistics text file.
+

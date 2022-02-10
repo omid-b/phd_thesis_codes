@@ -1,0 +1,32 @@
+#!/bin/csh -f
+
+#  prc=0: plot in m/s;   prc=1: plot in %
+set prc = 1	
+
+rm .gmtdefaults* .gmtcommands*
+gmt gmtset FONT_TITLE  = 16
+gmt gmtset FONT_LABEL = 14
+gmt gmtset PS_SCALE_X = 1
+gmt gmtset PS_SCALE_Y = 1
+
+set region="-R-90/10/55/89"
+set proj = "-JF-45/73/17/4i"
+set flags="-O -K "
+ 
+set psfile = plcg-synth.ps
+set scale = '/data/home/darbyshire_f/SW_TOMOGRAPHY/colour5.cpt'
+
+set stp = `head -4 inxc | tail -1` 
+cat dcg | awk '{print $1" "$2" "$4}' | gmt xyz2grd -Dms/m/m/1/0/=/= -Gdcg.grd -R0/360/45/89 -I$stp[2]/$stp[2]
+   
+gmt psbasemap $proj $region -B360f2 -BWSEn -K -V -P -Y18 > $psfile
+gmt grdview dcg.grd -C$scale $proj $region -Qi100 $flags -B -P >> $psfile
+gmt pscoast $proj $region -Di -Wthick,gray40 -A5000 -I5 -A2000 $flags -P >> $psfile
+awk '{print $1,$2,$3,$7/10}' < dap | gmt psxy $proj $region -SV1c+jc -Wthickest,green4 -Ggreen4 $flags -P -B >> $psfile
+
+echo "-45 54 90 0.5" | gmt psxy $proj $region -SV1c+jc -Wthickest,green4 -Ggreen4 $flags -P -N >> $psfile
+echo "-45 53 5% anisotropy" | gmt pstext $proj $region -F+f10p,Helvetica -P -N $flags >> $psfile
+
+gmt psscale -Dx3/-2+w5/0.5h -C$scale -B3+l"dU/U,%" -O -P -N >> $psfile
+
+

@@ -1,0 +1,48 @@
+#!/bin/csh
+#Parameters used from param file: homedir, passbands, evtloc, staloc
+
+cd `dirname $0`
+source ../param.csh
+
+clear
+cd $homedir
+
+#center of study region:
+set num_sta = `cat $staloc|wc|awk '{print $1}'`
+set sum_lat = `awk '{printf "%f ",$3}' $staloc|sed 's/ /+/g'|rev|cut -c 2-|rev|bc`
+set sum_lon = `awk '{printf "%f ",$2}' $staloc|sed 's/ /+/g'|rev|cut -c 2-|rev|bc`
+set center_lat = `echo "scale=2;$sum_lat/$num_sta"|bc`
+set center_lon = `echo "scale=2;$sum_lon/$num_sta"|bc`
+echo "Center of study region (lon&lat): $center_lon  $center_lat\n"
+
+
+#GMT scripts:
+#events distribution
+echo "Running the GMT script"
+set numEvt = `ls|grep "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]"|wc -l`
+echo "Number of events: $numEvt"
+echo -n "   Plotting evtloc distribution\r"
+set OUT = 'events.ps'
+set FLAGS_FIRST = "-Rg -JE$center_lon/$center_lat/6.5i -K -P"
+set FLAGS       = "-Rg -JE$center_lon/$center_lat/6.5i -K -O -P"
+set FLAGS_LAST  = "-Rg -JE$center_lon/$center_lat/6.5i -O -P"
+
+if (-e gmt.conf) rm -f gmt.conf
+if (-e gmt.history) rm -f gmt.history
+if (-e $OUT) rm -f $OUT
+
+gmt set FONT_ANNOT_PRIMARY 10p,Helvetica,black FONT_ANNOT_SECONDARY 8p,Helvetica,black \
+        FONT_LABEL 12p,Helvetica,black FONT_TITLE 18p,Helvetica-Bold,black FORMAT_GEO_MAP \
+        ddd:mm:ssF GMT_VERBOSE n MAP_ANNOT_OBLIQUE 6 MAP_ANNOT_OFFSET 5p MAP_FRAME_PEN \
+        thin,black MAP_FRAME_TYPE plain MAP_GRID_CROSS_SIZE_PRIMARY 2 PS_MEDIA 600x600 \
+        MAP_TITLE_OFFSET 0.2i
+
+gmt pscoast $FLAGS_FIRST -Di -B5555 -A5000 -Ggray50 >> $OUT
+gmt grdmath -Rd -I60m $center_lon $center_lat SDIST 111.13 DIV = dist.grd
+gmt grdcontour dist.grd -A60 -L0/160 -C20 -JE$center_lon/$center_lat/6.5i -P -Vn -O -K >> $OUT
+foreach evt (`ls|grep "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]"`)
+  cat $evtloc|grep $evt|awk '{print $2,$3}'|gmt psxy $FLAGS -Sc6p -Gblack -Wthin,black >> $OUT
+end
+echo $center_lon $center_lat|gmt psxy $FLAGS_LAST -Sa16p -Gred -Wthin,black >> $OUT
+rm -f dist.grd gmt.conf gmt.history
+echo -n "   Plotting evtloc distribution ... Done!\n\n"

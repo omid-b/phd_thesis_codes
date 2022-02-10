@@ -1,0 +1,29 @@
+#!/bin/csh -f
+
+# plot-knotnos.com
+
+gmt set FONT_TITLE  = 16
+gmt set FONT_LABEL = 14
+gmt set PS_SCALE_X = 1
+gmt set PS_SCALE_Y = 1
+gmt set MAP_FRAME_TYPE PLAIN
+
+set period = $1
+set infile = $2
+set xys='-O -K -V'
+
+set region="-R-90/10/55/89"
+set proj = "-JF-45/73/17/7i"
+set flags = " -O -K -V" 
+
+set psfile = gridnos-$period.ps
+#set psfile = coastlines.ps
+
+gmt psbasemap $proj $region -B360f2 -BWSEn -Y10 -K -V -P > $psfile
+gmt pscoast $proj $region -Di -W -A5000 $xys >> $psfile
+gmt psxy $infile $proj $region -Sc0.025 -Gblue $xys -B >> $psfile
+awk '{print $1,$2,$3}' < $infile | gmt pstext $proj $region -F+f6p,black+jCM $xys -B >> $psfile
+
+echo "200 40" | gmt psxy $proj $region -Sc0.01 -Gblack -B -O -V >> $psfile
+
+#gs $psfile

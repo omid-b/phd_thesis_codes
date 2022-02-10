@@ -1,0 +1,8 @@
+data/TPWanis_anomaly/phvel_gridded_p025.dat data/TPWanis/anis_p025_clipped.dat
+data/TPWanis_anomaly/phvel_gridded_p030.dat data/TPWanis/anis_p030_clipped.dat
+data/TPWanis_anomaly/phvel_gridded_p040.dat data/TPWanis/anis_p040_clipped.dat
+data/TPWanis_anomaly/phvel_gridded_p050.dat data/TPWanis/anis_p050_clipped.dat
+data/TPWanis_anomaly/phvel_gridded_p087.dat data/TPWanis/anis_p087_clipped.dat
+data/TPWanis_anomaly/phvel_gridded_p111.dat data/TPWanis/anis_p111_clipped.dat
+data/TPWanis_anomaly/phvel_gridded_p143.dat data/TPWanis/anis_p143_clipped.dat
+data/TPWanis_anomaly/phvel_gridded_p182.dat data/TPWanis/anis_p182_clipped.dat

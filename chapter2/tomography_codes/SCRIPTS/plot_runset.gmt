@@ -1,0 +1,292 @@
+#!/bin/csh
+# This script uses GMT to generate plots for the tomography 
+# inversion results in a "$runsetdir/inv*".
+# Note: This script requires:
+#       (1)"realpath" command to find absolute paths;
+#       to install:
+#          - MAC: brew install coreutils
+#       (2) ghostscript package (ps2epsi, epstopdf ...)
+# Usage1: csh plot_runset.gmt runsetdir
+# Usage2: csh plot_runset.gmt runsetdir period_1 ... period_n
+
+# CODED BY: omid.bagherpur@gmail.com
+# UPDATE: 8 Sep 2020
+
+clear
+
+if ($#argv == 0) then
+    printf "Error Usage\n\n Usage1: csh plot_runset.gmt runsetdir\n\n Usage2: csh plot_runset.gmt runsetdir period_1 ... period_n\n\n"
+    exit
+endif
+
+if (-e param.csh) then
+    source param.csh
+else
+    printf "Error!\n Could not find 'param.csh' in current directory.\n\n"
+    exit
+endif
+
+
+
+@ i=1
+set periodsNew = ()
+set periodsOld = ($periods)
+foreach arg ($argv)
+    if ( $i > 1 ) then
+        set periods = ($periodsNew $arg)
+        set periodsNew = ($periods)
+        set flag = 0
+        foreach period ($periodsOld)
+            if ($period == $arg) then
+                set flag = 1
+            endif
+        end
+        if ($flag == 0) then
+            printf "\nError!\n The given period(s) is/are not included in the list of periods in 'param.csh'!\n\n"
+            exit
+        endif
+    endif
+    @ i++
+end
+
+
+set runsetdir = `realpath $argv[1]`
+printf "runset: $runsetdir\n\n"
+
+if (! -d $runsetdir) then
+    printf "Error!\n Could not find runset directory!\n\n"
+    exit
+endif
+
+if (`ls $runsetdir|grep ^"inv"|wc -l` == 0) then
+    printf "Error!\n Could not find 'inv*' directory in the given runset directory!\nCheck the runset path!\n\n"
+    exit
+else
+    set invdirs = `ls $runsetdir|grep ^"inv"|awk '{printf "%s ", $1}'`
+endif
+
+set num_periods = `echo $periods|wc -w`
+
+printf "#Periods: $num_periods\nPeriods: $periods\nScale range: [$c_scale_range[1] $c_scale_range[2]]\nC/U plot flag: $plot_flags[1]\n2psi plot flag: $plot_flags[2]\n4psi plot flag: $plot_flags[3]\nraypath plot flag: $plot_flags[4]\n \n\n\nDo you want to continue (y/n)? "
+
+set uin = $<
+if ($uin == 'y' || $uin == 'Y') then
+    printf "\n\n"
+else
+    printf "\n\nExit Program!\n\n"
+    exit
+endif
+
+#------STEP1-------#
+# 1) set gmt defaults
+# 2) find region and projection
+#------------------#
+foreach inv ($invdirs)
+    if (-d $runsetdir/plot_$inv) rm -rf $runsetdir/plot_$inv
+    mkdir $runsetdir/plot_$inv
+    cd $runsetdir/plot_$inv
+
+    gmt set FONT_ANNOT_PRIMARY 18p,Helvetica,black
+    gmt set FONT_ANNOT_SECONDARY 18p,Helvetica,black
+    gmt set FORMAT_GEO_MAP ddd:mm:ssF
+    gmt set MAP_FRAME_TYPE plain
+    gmt set MAP_FRAME_PEN thick,black
+    gmt set MAP_ANNOT_OBLIQUE 6
+    gmt set MAP_ANNOT_OFFSET 10p
+    gmt set PS_MEDIA 1000px1000p
+    gmt set GMT_VERBOSE q 
+
+    @ i=1
+    while ($i <= $num_periods)
+        set periods[$i] = `echo $periods[$i]|awk '{printf "%03d",$1}'`
+        awk '{printf "%f\n",$1}' $runsetdir/$inv/$periods[$i]/dcg >> x.tmp
+        awk '{printf "%f\n",$2}' $runsetdir/$inv/$periods[$i]/dcg >> y.tmp
+        @ i++
+    end
+end
+
+set lon1 = `sort -n x.tmp|uniq|head -1`
+set lon2 = `sort -n x.tmp|uniq|tail -1`
+set lat1 = `sort -n y.tmp|uniq|head -1`
+set lat2 = `sort -n y.tmp|uniq|tail -1`
+set lon_mid = `echo $lon1 $lon2|awk '{print ($1+$2)/2}'`
+set lat_mid = `echo $lat1 $lat2|awk '{print ($1+$2)/2}'`
+set prj = "L$lon_mid/$lat_mid/$lat1/$lat2/700p"
+
+set lon1 = `echo "$lon1 $margin_adjust[1]"|awk '{printf "%.1f",$1-$2}'`
+set lon2 = `echo "$lon2 $margin_adjust[1]"|awk '{printf "%.1f",$1+$2}'`
+set lat1 = `echo "$lat1 $margin_adjust[2]"|awk '{printf "%.1f",$1-$2}'`
+set lat2 = `echo "$lat2 $margin_adjust[2]"|awk '{printf "%.1f",$1+$2}'`
+
+set reg = "$lon1/$lon2/$lat1/$lat2"
+
+if ($gmt_manual_reg[1] == 1) then
+    printf "WARNING! map region is set manually!\n"
+    set reg = $gmt_manual_reg[2]
+endif
+
+if ($gmt_manual_prj[1] == 1) then
+    printf "WARNING! map projection is set manually!\n"
+    set prj = $gmt_manual_prj[2]
+endif
+
+printf "gmt region: $reg\n"
+printf "gmt projection: $prj\n"
+
+#------STEP2-------#
+# plot c, 2psi, 4psi
+#------------------#
+
+foreach inv ($invdirs)
+printf "\nInversion results directory: $inv\n"
+    cd $runsetdir/plot_$inv
+    @ i=1
+    while ($i <= $num_periods)
+        printf "\nPeriod ($i of $num_periods): $periods[$i] s\n"
+
+        # Isotropic maps
+        if ($plot_flags[1] == 1 && `ls $runsetdir/$inv/$periods[$i]|grep dcg|wc -l` != 0) then
+            printf "  plotting the C/U map\n"
+            set fn = c_$periods[$i]
+            set grdStep = `awk 'NR==4' $runsetdir/$inv/$periods[$i]/inxc|awk '{print $2}'`
+            awk '{printf "%f %f %f\n",$1,$2,$4}' $runsetdir/$inv/$periods[$i]/dcg|gmt xyz2grd -Gc.grd -R$reg -I$grdStep
+            gmt grd2cpt c.grd -Croma -L$c_scale_range[1]/$c_scale_range[2] -S`echo $c_scale_range[1] $c_scale_range[2]|awk '{printf "%f/%f/%s",$1+($2-$1)/5,$2-($2-$1)/5,($2-$1)/20}'` -Vq -Z > scale.cpt
+            gmt psbasemap -X100p -J$prj -R$reg -Bx$annot[1] -By$annot[2] -BWseN -K -P  > $fn.ps
+            gmt grdview c.grd -Cscale.cpt -J$prj -R$reg -Qi$raster_dpi -B -O -K -P  -Vq >> $fn.ps
+            gmt pscoast -J$prj -R$reg -Di -W1p,black -Na -A5000 -I5 -B -O -K -P  -Vq >> $fn.ps
+            echo 0 0|gmt psxy -J$prj -R$reg -Sc0.001p -Gblack -Wthin,black -O -P >> $fn.ps 
+            if (`echo $OSTYPE|grep darwin|wc|awk '{print $1}'` == 1) then
+                ps2eps $fn.ps >& /dev/null
+                epstopdf $fn.eps --outfile=$fn.pdf
+            else
+                ps2epsi $fn.ps $fn.epsi
+                epstopdf $fn.epsi --outfile=$fn.pdf 
+            endif
+        else
+           set plot_flags[1] = 0 
+        endif
+
+        # 2psi maps
+        if ($plot_flags[2] == 1 && `ls $runsetdir/$inv/$periods[$i]|grep dap|wc -l` != 0) then
+            printf "  plotting the 2psi map\n"
+            set fn = 2psi_$periods[$i]
+            if ($plot_flags[1] == 0) then
+                set grdStep = `awk 'NR==4' $runsetdir/$inv/$periods[$i]/inxc|awk '{print $2}'`
+                awk '{printf "%f %f %f\n",$1,$2,$4}' $runsetdir/$inv/$periods[$i]/dcg|gmt xyz2grd -Gc.grd -R$reg -I$grdStep
+                gmt grd2cpt c.grd -Croma -L$c_scale_range[1]/$c_scale_range[2] -S`echo $c_scale_range[1] $c_scale_range[2]|awk '{printf "%f/%f/%s",$1+($2-$1)/5,$2-($2-$1)/5,($2-$1)/20}'` -Vq -Z > scale.cpt
+            endif
+            gmt psbasemap -X100p -J$prj -R$reg -Bx$annot[1] -By$annot[2] -BWseN -K -P  > $fn.ps
+            gmt grdview c.grd -Cscale.cpt -J$prj -R$reg -Qi$raster_dpi -B -O -K -P  -Vq >> $fn.ps
+            gmt pscoast -J$prj -R$reg -Di -W1p,black -Na -A5000 -I5 -B -O -K -P  -Vq >> $fn.ps
+            @ j=1
+            while ($j <= `cat $runsetdir/$inv/$periods[$i]/dap|wc -l`)
+                set line = `awk NR==$j $runsetdir/$inv/$periods[$i]/dap|awk -v fac=$anis_bar_factor[1] '{printf "%f %f %f %f\n",$1,$2,$3,$7*fac}'`
+                echo $line | gmt psxy -R$reg -J$prj -SV1c+jc -W$anis_bar_thickness,$anis_bar_color -G$anis_bar_color -O -K -Vq >> $fn.ps
+                @ j++
+            end
+            echo "$anis_scale_bar_xy[1] $anis_scale_bar_xy[2] $anis_scale_bar_azim $anis_scale_bar_value $anis_bar_factor[1]"|awk '{print $1,$2,$3,$4*$5}' | gmt psxy -R$reg -J$prj -SV1c+jc -W$anis_bar_thickness,$anis_bar_color -G$anis_bar_color -O -K -Vq >> $fn.ps
+            echo "$anis_scale_txt_xy[1] $anis_scale_txt_xy[2] $anis_scale_bar_value% anisotropy" | gmt pstext -J -R -F+f$annot_font_size -O -K -N >> $fn.ps
+            echo 0 0|gmt psxy -J$prj -R$reg -Sc0.001p -Gblack -Wthin,black -O -P >> $fn.ps 
+            if (`echo $OSTYPE|grep darwin|wc|awk '{print $1}'` == 1) then
+                ps2eps $fn.ps >& /dev/null
+                epstopdf $fn.eps --outfile=$fn.pdf
+            else
+                ps2epsi $fn.ps $fn.epsi
+                epstopdf $fn.epsi --outfile=$fn.pdf 
+            endif
+        else
+           set plot_flags[2] = 0 
+        endif
+
+        # 4psi maps
+        if ($plot_flags[3] == 1 && `ls $runsetdir/$inv/$periods[$i]|grep d4p|wc -l` != 0) then
+            printf "  plotting the 4psi map\n"
+            set fn = 4psi_$periods[$i]
+            if ($plot_flags[1] == 0) then
+                set grdStep = `awk 'NR==4' $runsetdir/$inv/$periods[$i]/inxc|awk '{print $2}'`
+                awk '{printf "%f %f %f\n",$1,$2,$4}' $runsetdir/$inv/$periods[$i]/dcg|gmt xyz2grd -Gc.grd -R$reg -I$grdStep
+                gmt grd2cpt c.grd -Croma -L$c_scale_range[1]/$c_scale_range[2] -S`echo $c_scale_range[1] $c_scale_range[2]|awk '{printf "%f/%f/%s",$1+($2-$1)/5,$2-($2-$1)/5,($2-$1)/20}'` -Vq -Z > scale.cpt
+            endif
+            gmt psbasemap -X100p -J$prj -R$reg -Bx$annot[1] -By$annot[2] -BWseN -K -P  > $fn.ps
+            gmt grdview c.grd -Cscale.cpt -J$prj -R$reg -Qi$raster_dpi -B -O -K -P  -Vq >> $fn.ps
+            gmt pscoast -J$prj -R$reg -Di -W1p,black -Na -A5000 -I5 -B -O -K -P  -Vq >> $fn.ps
+            @ j=1
+
+            while ($j <= `cat $runsetdir/$inv/$periods[$i]/d4p|wc -l|awk '{print $1/2}'`)
+                set k1 = `echo $j|awk '{print 2*$1-1}'`
+                set k2 = `echo $j|awk '{print 2*$1}'`
+                set line1 = `awk NR==$k1 $runsetdir/$inv/$periods[$i]/d4p|awk -v fac=$anis_bar_factor[2] '{printf "%f %f %f %f\n",$1,$2,$3,$7*fac}'`
+                set line2 = `awk NR==$k2 $runsetdir/$inv/$periods[$i]/d4p|awk -v fac=$anis_bar_factor[2] '{printf "%f %f %f %f\n",$1,$2,$3,$7*fac}'`
+                echo $line1 | gmt psxy -R$reg -J$prj -SV1c+jc -W$anis_bar_thickness,$anis_bar_color -G$anis_bar_color -O -K -Vq >> $fn.ps
+                echo $line2 | gmt psxy -R$reg -J$prj -SV1c+jc -W$anis_bar_thickness,$anis_bar_color -G$anis_bar_color -O -K -Vq >> $fn.ps
+                @ j++
+            end
+            echo "$anis_scale_bar_xy[1] $anis_scale_bar_xy[2] $anis_scale_bar_azim $anis_scale_bar_value $anis_bar_factor[2]"|awk '{print $1,$2,$3,$4*$5}' | gmt psxy -R$reg -J$prj -SV1c+jc -W$anis_bar_thickness,$anis_bar_color -G$anis_bar_color -O -K -Vq >> $fn.ps
+            echo "$anis_scale_txt_xy $anis_scale_bar_value% anisotropy" | gmt pstext -J -R -F+f$annot_font_size -O -K -N >> $fn.ps
+            echo 0 0|gmt psxy -J$prj -R$reg -Sc0.001p -Gblack -Wthin,black -O -P >> $fn.ps 
+            if (`echo $OSTYPE|grep darwin|wc|awk '{print $1}'` == 1) then
+                ps2eps $fn.ps >& /dev/null
+                epstopdf $fn.eps --outfile=$fn.pdf
+            else
+                ps2epsi $fn.ps $fn.epsi
+                epstopdf $fn.epsi --outfile=$fn.pdf 
+            endif
+        else
+           set plot_flags[3] = 0 
+        endif
+        
+        if ($plot_flags[1] == 1 || $plot_flags[2] == 1 || $plot_flags[3] == 1) then
+            set zmin = `gmt grdinfo  c.grd |grep z_|awk '{print $3}'`
+            set zmax =  `gmt grdinfo  c.grd |grep z_|awk '{print $5}'`
+            printf "  grdinfo (min, max): (%.1f,  %.1f)\n" $zmin $zmax
+        endif
+        
+        
+        # raypaths
+        if ($plot_flags[4] == 1) then
+            printf "  plotting the raypaths map\n"
+            set fn = rays_$periods[$i]
+            gmt psbasemap -X100p -J$prj -R$reg -Bx$annot[1] -By$annot[2] -BWseN -K -P  > $fn.ps
+            grep -v ">" $runsetdir/$inv/$periods[$i]/paths|awk 'NR % 2 == 1' > p1.tmp
+            grep -v ">" $runsetdir/$inv/$periods[$i]/paths|awk 'NR % 2 == 0' > p2.tmp
+            paste p1.tmp p2.tmp > p12.tmp
+            set np = `cat p1.tmp|wc -l`
+            echo "#Rays: $np" > rays_$periods[$i]
+            @ j=1
+            while ($j <= $np)
+                awk NR==$j p12.tmp| awk '{printf "%f %f\n%f %f\n",$1,$2,$3,$4}'|gmt psxy -R$reg -J$prj -W0.5p,green4 -O -K -P -Vq >> $fn.ps
+                @ j++
+            end
+            gmt pscoast -J$prj -R$reg -Di -W2p,gray40 -A5000 -I5 -B -O -K -P  -Vq >> $fn.ps
+            #just to finalize the psfile:
+            echo 0 0|gmt psxy -J$prj -R$reg -Sc0.001p -Gblack -Wthin,black -O -P >> $fn.ps 
+            if (`echo $OSTYPE|grep darwin|wc|awk '{print $1}'` == 1) then
+                ps2eps $fn.ps >& /dev/null
+                epstopdf $fn.eps --outfile=$fn.pdf
+            else
+                ps2epsi $fn.ps $fn.epsi
+                epstopdf $fn.epsi --outfile=$fn.pdf 
+            endif
+        endif
+
+        @ i++
+    end
+
+    if ($plot_flags[1] == 1 || $plot_flags[2] == 1 || $plot_flags[3] == 1) then
+        gmt set PS_MEDIA 600px120c
+        gmt psscale -Cscale.cpt -Dx1c/1c+w16c/1c+jTL+h -B1 -P > scale.ps
+        if (`echo $OSTYPE|grep darwin|wc|awk '{print $1}'` == 1) then
+                ps2eps scale.ps >& /dev/null
+                epstopdf scale.eps --outfile=scale.pdf
+            else
+                ps2epsi scale.ps scale.epsi
+                epstopdf scale.epsi --outfile=scale.pdf 
+            endif
+    endif
+    
+    rm -f *.ps *.eps* c.grd *gmt* *tmp *cpt
+end
+
+printf "\n\nDone!\n\n"
+
+

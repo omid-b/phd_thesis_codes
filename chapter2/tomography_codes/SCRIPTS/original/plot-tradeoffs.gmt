@@ -1,0 +1,31 @@
+#!/bin/csh -f
+
+set statsfile=stats-anis
+set rmax=620
+set remmin=0.10
+set remmax=0.21
+
+set psfile=$statsfile.ps
+
+gmt psbasemap -JX15/8 -R0/$rmax/$remmin/$remmax -Bxa20+l"Roughness" -Bya0.02+l"Rem variance" -BWSne -Y10 -V -K -P > $psfile
+
+awk ' NR > 1 {print $6,$3}' < $statsfile | gmt psxy -JX -R -Wthick,red -O -V -K >> $psfile
+awk ' NR > 1 {print $6,$3}' < $statsfile | gmt psxy -JX -R -Sa0.2 -Wthin,red -O -V -K >> $psfile
+
+awk ' NR > 1 {print $7,$3}' < $statsfile | gmt psxy -JX -R -Wthick,green -O -V -K >> $psfile
+awk ' NR > 1 {print $7,$3}' < $statsfile | gmt psxy -JX -R -Sa0.2 -Wthin,green -O -V -K >> $psfile
+
+awk ' NR > 1 {print $8,$3}' < $statsfile | gmt psxy -JX -R -Wthick,blue -O -V -K >> $psfile
+awk ' NR > 1 {print $8,$3}' < $statsfile | gmt psxy -JX -R -Sa0.2 -Wthin,blue -O -V -K >> $psfile
+
+#awk ' NR > 1 {print $6,$3,$1}' < $statsfile | gmt pstext -JX -R -F+f10p,red -O -V -N >> $psfile
+awk ' NR > 1 {print $7,$3,$1}' < $statsfile | gmt pstext -JX -R -F+f10p,green -O -V -N >> $psfile
+
+#echo "15 0.38 Uiso values" | gmt pstext -JX -R -F+f10p -O -K -V -N >> $psfile
+#echo "15 0.36 2psi values" | gmt pstext -JX -R -F+f10p -O -K -V -N >> $psfile
+#echo "15 0.34 4psi values" | gmt pstext -JX -R -F+f10p -O -K -V -N >> $psfile
+
+#echo "0 0.67 Tradeoff curves by U, fixed anisotropy " | gmt pstext -JX -R -F+f12p -O -V -N >> $psfile
+#echo "0 0.67 Tradeoff curves by psi, fixed U " | gmt pstext -JX -R -F+f12p -O -V -N >> $psfile
+#echo "0 0.67 Tradeoff curves by damping " | pstext -JX -R -F+f12p -O -V -N >> $psfile
+

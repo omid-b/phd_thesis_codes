@@ -1,0 +1,147 @@
+#!/bin/csh
+
+cd `dirname $0`
+source ../param.csh
+#---Adjustable Parameters----
+# Go to 'gmt set' line
+# Set grdSpacing and mediaSize in param file
+#----------------------------
+clear
+cd $homedir
+
+#Study region:
+set numNodes = `awk 'NR==2' $grid`
+set lon_l1 = `awk 'NR>2' $grid|head -n$numNodes|awk '{print $2}'|sort -n  |awk 'NR==1'`
+set lon_l2 = `awk 'NR>2' $grid|head -n$numNodes|awk '{print $2}'|sort -nr |awk 'NR==1'`
+set lat_l1 = `awk 'NR>2' $grid|head -n$numNodes|awk '{print $1}'|sort -n  |awk 'NR==1'`
+set lat_l2 = `awk 'NR>2' $grid|head -n$numNodes|awk '{print $1}'|sort -nr  |awk 'NR==1'`
+set center_lon = `echo "$lon_l1 $lon_l2"|awk '{printf "%.2f\n", ($2 - $1)/2 +$1}'`
+set center_lat = `echo "$lat_l1 $lat_l2"|awk '{printf "%.2f\n", ($2 - $1)/2 +$1}'`
+set area = $lon_l1/$lon_l2/$lat_l1/$lat_l2
+set prj = "L$center_lon/$center_lat/$lat_l1/$lat_l2/12i"
+
+echo "This script plots all 2D phase velocity maps using the data from grid_*.xy\n Center of study region (lon&lat): $center_lon  $center_lat\n"
+if (! -e average.disp) then
+  echo "\n WARNING! Could not find 'average.disp' in home directory:\n  homedir: $homedir"
+  echo "  Only absolute phase velocity variations will be plotted!\n"
+else
+  awk '{printf "%03.0f  %f\n",$1,$2}' average.disp > average.disp.tmp
+  rm -f average.disp; mv average.disp.tmp average.disp
+endif
+foreach runset (`ls|grep "run_2D*"`)
+  cd $homedir/$runset
+  echo " Running GMT script on $runset"
+  if (! -e errMask.nc) echo "  WARNING! Could not find 'errMask.nc' in $runset!\n  Maps will not be masked in this runset!\n"
+  if (-e gmt.history) rm -f gmt.history
+  if (-e gmt.conf) rm -f gmt.conf
+  if (-d 2D_maps) rm -rf 2D_maps
+  mkdir 2D_maps
+  cd $homedir/$runset/2D_maps
+  
+  
+  gmt set FONT_ANNOT_PRIMARY 14p,Helvetica,black FONT_ANNOT_SECONDARY 8p,Helvetica,black \
+        FONT_LABEL 12p,Helvetica,black FONT_TITLE 22p,Helvetica-Bold,black FORMAT_GEO_MAP \
+        ddd:mm:ssF GMT_VERBOSE n MAP_ANNOT_OBLIQUE 6 MAP_ANNOT_OFFSET 5p MAP_FRAME_PEN \
+        thinnest,black MAP_FRAME_TYPE fancy MAP_GRID_CROSS_SIZE_PRIMARY 2 PS_MEDIA "$mediaSize" \
+        MAP_TITLE_OFFSET 0.2i  COLOR_NAN white COLOR_FOREGROUND white \
+        COLOR_BACKGROUND white
+
+#Gridding
+  foreach period (`awk 'NR>1' $passbands|awk '{printf "%03.0f\n", $3}'`) 
+    printf "   Gridding on period: $period                \r"
+    
+    gmt blockmean ../grid_$period.xy -R$area -I$grdSpacing > bm.tmp
+    gmt surface bm.tmp -I$grdSpacing -R$area -T0 -Gabs_$period.nc
+    gmt grdhisteq abs_$period.nc -GabsHist_$period.nc -C256
+    
+    if (-e $homedir/$runset/errMask.nc) then
+      gmt grdmath ../errMask.nc abs_$period.nc MUL = abs_$period.nc.tmp
+      rm -f abs_$period.nc; mv abs_$period.nc.tmp abs_$period.nc
+      gmt grdmath ../errMask.nc absHist_$period.nc MUL = absHist_$period.nc.tmp
+      rm -f absHist_$period.nc; mv absHist_$period.nc.tmp absHist_$period.nc
+    endif
+    
+  end #period
+  printf "   Gridding on all periods ... Done!   \n"
+  
+#Making color palletes
+  printf "   Making color palletes   \r"
+  set pertMin = 0
+  set pertMax = 0
+  foreach period (`awk 'NR>1' $passbands|awk '{printf "%03.0f\n", $3}'`) 
+    set grdMin  = `gmt grdinfo abs_$period.nc -M|grep -w z_min|awk '{printf "%f\n",$3}'`
+    set grdMax  = `gmt grdinfo abs_$period.nc -M|grep -w z_max|awk '{printf "%f\n",$12}'`
+    set cptStep = `echo $grdMax $grdMin|awk '{printf "%f\n",($1 - $2)/50}'`
+    set cptL1 = `echo $grdMin $cptStep|awk '{printf "%f\n",$1 - $2}'`
+    set cptL2 = `echo $grdMax $cptStep|awk '{printf "%f\n",$1 + $2}'`
+    gmt makecpt -Cseis -T$cptL1/$cptL2/$cptStep -Z > abs_$period.cpt
+    gmt makecpt -Cseis -I -T0/255/32 > absHist_$period.cpt
+    
+    if (-e $homedir/average.disp) then
+      set avg = `grep -w $period $homedir/average.disp|awk '{print $2}'`
+      gmt grdmath -R$area abs_$period.nc $avg SUB $avg DIV 100 MUL = pert_$period.nc
+      set grdMin = `gmt grdinfo pert_$period.nc -M|grep -w z_min|awk '{printf "%f\n",$3}'`
+      set grdMax = `gmt grdinfo pert_$period.nc -M|grep -w z_max|awk '{printf "%f\n",$12}'`
+      set cptStep = `echo $grdMax $grdMin|awk '{printf "%f\n",($1 - $2)/50}'`
+      set cptL1 = `echo $grdMin $cptStep|awk '{printf "%f\n",$1 - $2}'`
+      set cptL2 = `echo $grdMax $cptStep|awk '{printf "%f\n",$1 + $2}'`
+      gmt makecpt -Cseis -T$cptL1/$cptL2/$cptStep -Z > pert_$period.cpt
+      if (`echo "$grdMin < $pertMin"|bc`) set pertMin = $grdMin
+      if (`echo "$grdMax > $pertMax"|bc`) set pertMax = $grdMax
+    endif 
+  end #period
+  if (-e $homedir/average.disp) then
+    set cptStep = `echo $pertMax $pertMin|awk '{printf "%f\n",($1 - $2)/50}'`
+    set cptL1 = `echo $pertMin $cptStep|awk '{printf "%f\n",$1 - $2}'`
+    set cptL2 = `echo $pertMax $cptStep|awk '{printf "%f\n",$1 + $2}'`
+    
+    gmt makecpt -Cseis -T$cptL1/$cptL2/$cptStep -Z > pert.cpt
+  endif 
+  printf "   Making color palletes ..... Done!   \n"
+  
+#Plotting
+  foreach period (`awk 'NR>1' $passbands|awk '{printf "%03.0f\n", $3}'`)
+  printf "   Plotting on period: $period                \r"
+    gmt psbasemap -R$area -J$prj -Y2i -Ba -BWSne+t"Absolute phase velocity at period (sec): $period" -K > abs_$period.ps
+    gmt grdimage abs_$period.nc -Cabs_$period.cpt -R$area -J$prj -E300 -K -O >> abs_$period.ps
+    gmt psscale -Dx1i/-0.9i+jTL+w10i/0.4i+h -Cabs_$period.cpt -R$area -J$prj -Ba -By+l"(km/s)" -O -K >> abs_$period.ps
+    gmt grdcontour absHist_$period.nc -CabsHist_$period.cpt -R$area -J$prj -A- -Wthinnest,gray50 -K -O >> abs_$period.ps
+    gmt pscoast -R$area -J$prj -Wthin,black -Di -A1000k -Ba -O -K >> abs_$period.ps
+    cat $grid|awk '2<NR'|head -n$numNodes|awk '{printf "%11.6f %11.6f\n",$2,$1}'|gmt psxy -R$area -J$prj -Sc0.03i -Gblack -O -K >> abs_$period.ps
+    awk '{printf "%11.6f %11.6f\n",$2,$3}' $staloc|gmt psxy -R$area -J$prj -Si0.15i -Ggold -Wthick,brown -O >> abs_$period.ps
+    if (-e $homedir/average.disp) then
+      #cpt1 (unique cpt for all periods)
+      gmt psbasemap -R$area -J$prj -Y2i -Ba -BWSne+t"Phase velocity perturbations at period (sec): $period" -K > pert_cpt1_$period.ps
+      gmt grdimage pert_$period.nc -Cpert.cpt -R$area -J$prj -E300 -K -O >> pert_cpt1_$period.ps
+      gmt psscale -Dx1i/-0.9i+jTL+w10i/0.4i+h -Cpert.cpt -R$area -J$prj -Ba -By+l"(%)" -O -K >> pert_cpt1_$period.ps
+      gmt grdcontour absHist_$period.nc -CabsHist_$period.cpt -R$area -J$prj -A- -Wthinnest,gray50 -K -O >> pert_cpt1_$period.ps
+      gmt pscoast -R$area -J$prj -Wthin,black -Di -A1000k -Ba -O -K >> pert_cpt1_$period.ps
+      cat $grid|awk '2<NR'|head -n$numNodes|awk '{printf "%11.6f %11.6f\n",$2,$1}'|gmt psxy -R$area -J$prj -Sc0.03i -Gblack -O -K >> pert_cpt1_$period.ps
+      awk '{printf "%11.6f %11.6f\n",$2,$3}' $staloc|gmt psxy -R$area -J$prj -Si0.15i -Ggold -Wthick,brown -O >> pert_cpt1_$period.ps
+      
+      #cpt2 (various cpt)
+      gmt psbasemap -R$area -J$prj -Y2i -Ba -BWSne+t"Phase velocity perturbations at period (sec): $period" -K > pert_cpt2_$period.ps
+      gmt grdimage pert_$period.nc -Cpert_$period.cpt -R$area -J$prj -E300 -K -O >> pert_cpt2_$period.ps
+      gmt psscale -Dx1i/-0.9i+jTL+w10i/0.4i+h -Cpert_$period.cpt -R$area -J$prj -Ba -By+l"(%)" -O -K >> pert_cpt2_$period.ps
+      gmt grdcontour absHist_$period.nc -CabsHist_$period.cpt -R$area -J$prj -A- -Wthinnest,gray50 -K -O >> pert_cpt2_$period.ps
+      gmt pscoast -R$area -J$prj -Wthin,black -Di -A1000k -Ba -O -K >> pert_cpt2_$period.ps
+      cat $grid|awk '2<NR'|head -n$numNodes|awk '{printf "%11.6f %11.6f\n",$2,$1}'|gmt psxy -R$area -J$prj -Sc0.03i -Gblack -O -K >> pert_cpt2_$period.ps
+      awk '{printf "%11.6f %11.6f\n",$2,$3}' $staloc|gmt psxy -R$area -J$prj -Si0.15i -Ggold -Wthick,brown -O >> pert_cpt2_$period.ps
+      
+      #cpt3 (symmetric cpt for each period)
+      gmt psbasemap -R$area -J$prj -Y2i -Ba -BWSne+t"Phase velocity perturbations at period (sec): $period" -K > pert_cpt3_$period.ps
+      gmt grd2cpt pert_$period.nc -E50 -Z -T= -Cseis > pert_$period.cpt3
+      gmt grdimage pert_$period.nc -Cpert_$period.cpt3 -R$area -J$prj -E300 -K -O >> pert_cpt3_$period.ps
+      gmt psscale -Dx1i/-0.9i+jTL+w10i/0.4i+h -Cpert_$period.cpt3 -R$area -J$prj -Ba -By+l"(%)" -O -K >> pert_cpt3_$period.ps
+      gmt grdcontour absHist_$period.nc -CabsHist_$period.cpt -R$area -J$prj -A- -Wthinnest,gray50 -K -O >> pert_cpt3_$period.ps
+      gmt pscoast -R$area -J$prj -Wthin,black -Di -A1000k -Ba -O -K >> pert_cpt3_$period.ps
+      cat $grid|awk '2<NR'|head -n$numNodes|awk '{printf "%11.6f %11.6f\n",$2,$1}'|gmt psxy -R$area -J$prj -Sc0.03i -Gblack -O -K >> pert_cpt3_$period.ps
+      awk '{printf "%11.6f %11.6f\n",$2,$3}' $staloc|gmt psxy -R$area -J$prj -Si0.15i -Ggold -Wthick,brown -O >> pert_cpt3_$period.ps
+      
+    endif
+  end #period
+  printf "   Plotting on all periods ... Done!                \n"
+  rm -f *.cpt *.cpt3 *.tmp *.nc gmt.*
+end #runset
+
+

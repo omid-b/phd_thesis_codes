@@ -1,0 +1,75 @@
+#!/bin/csh -f
+
+set prc = 1	
+
+rm .gmtdefaults*
+gmt gmtset FONT_TITLE  = 16
+gmt gmtset FONT_LABEL = 14
+gmt gmtset PS_SCALE_X = 1
+gmt gmtset PS_SCALE_Y = 1
+# gmt gmtset FONT_ANNOT = 1
+
+# gmt gmtset ANOT_FONT  1
+# gmt gmtset ANOT_FONT_SIZE = 9
+# gmt gmtset LABEL_FONT_SIZE 10
+# gmt gmtset ANOT_OFFSET  0.04
+# gmt gmtset TICK_LENGTH  0.02
+
+set R = '275/305/42/64'
+set avelo = 277
+# set JW=${avelo}/11.4
+set JW=4.7i
+set Rg = '275/305/41/63'
+set xys=" -O -K" 
+
+set ks = `head -1 shell`
+set ks = `echo $ks[3] | awk -F. '{print $1}'`
+
+set stp = `head -4 inxc | tail -1`
+
+  
+  set scale = 'cea_tomo_L.cpt'
+  # gmt makecpt -Ccea_tomo_L.cpt -T-2.4/2.4/0.1 > colors.cpt
+  # set scale = 'colors.cpt'
+  # cp ../$scale .
+
+  # gmt makecpt -Ccea_tomo.cpt -T-3.5/3.5/0.1 -Z -A50 > cea_tomo_L.cpt
+
+set period = `pwd | wc -c`
+@ p0 = $period - 3
+set period = `pwd | cut -c $p0-$period`
+echo ----$period----
+
+set psfile = tomo_${period}.ps
+echo -------- $psfile --------
+
+set stp = `head -4 inxc | tail -1` 
+cat dcg | awk '{print $1" "$2" "$4}' | gmt xyz2grd -Dms/m/m/1/0/=/= -Gdcg.grd -R0/360/42/64 -I$stp[2]/$stp[2]
+
+# Isotropic plus 2psi
+gmt psbasemap -JW$JW -R${R} -Ba5f5WSen -Y17 -K  -P >! $psfile
+gmt grdview dcg.grd -C$scale -R$R -JW -Qi100 $xys >> $psfile
+gmt pscoast -JW$JW -R${R} -Di -Wthick,100 -A2000 $xys >> $psfile
+awk '{print $1,$2,$3,$7/2}' < dap | gmt psxy -R$R -JW -SV0.01i+jcenter -Wthin,0 -G0/180/0 $xys >> $psfile
+echo "298 43.5 -89.9 2.0" | gmt psxy -R$R -JW -SV0.01i+jcenter -Wthin,0 -G0/255/0 $xys >> $psfile
+echo "298 43 5% anisotropy" | gmt pstext -F+f10p,Helvetica -R -JW $xys >> $psfile
+echo "301 62 2 psi" | gmt pstext -F+f15p,Helvetica-Bold -R -JW $xys >> $psfile
+echo "303 43 $period s" | gmt pstext -F+f15p,Helvetica-Bold -R -JW $xys >> $psfile
+
+# Isotropic plus 4psi plus paths
+gmt psbasemap -JW$JW -R${R} -Ba5f5WSen -Y-12 $xys >> $psfile
+gmt grdview dcg.grd -C$scale -R$R -JW -Qi100 $xys >> $psfile
+gmt pscoast -JW$JW -R${R} -Di -Wthick,100 -A2000 $xys >> $psfile
+gmt psxy paths -R$R -JW -Wthin,0/200/0 -B $xys >> $psfile
+gmt psxy paths -R$R -JW -St0.1 -G255/0/0 -B $xys >> $psfile
+# gmt psxy d4p -R$R -JW -SE -W1p,0 $xys -B >> $psfile
+awk '{print $1,$2,$3,$7/2}' < d4p | gmt  psxy -R$R -JW -SV0.01i+jcenter -Wthin,0 -G0/255/0 $xys >> $psfile
+gmt psscale -D5/-1/5/0.3h -C${scale} -B1:dC/C,%: $xys >> $psfile
+# -D7.5/-1/5/0.5h (from plcg-synth.gmt)
+# -D5/-1/5/0.2h (from plcg.gmt)
+
+echo "301 62 4 psi" | gmt pstext -F+f15p,Helvetica-Bold -R -JW $xys >> $psfile
+echo "303 43 $period s" | gmt pstext -F+f15p,Helvetica-Bold -R -JW -O >> $psfile
+
+#gs $psfile
+
